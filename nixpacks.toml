@@ -1,0 +1,7 @@
+# Railway Generator 서비스 빌드 시 ffmpeg 설치 (클립/숏츠 오디오 처리에 필요)
+# Worker 서비스는 Root Directory가 web 이므로 이 파일이 적용되지 않음 → Generator 전용
+# 참고: Railway가 Railpack을 쓰면 이 파일이 무시될 수 있음 → Generator 환경 변수에
+#       RAILPACK_DEPLOY_APT_PACKAGES=ffmpeg 추가 (web/docs/RAILWAY.md 참고)
+[phases.setup]
+aptPkgs = ["ffmpeg"]
+nixPkgs = ["ffmpeg"]

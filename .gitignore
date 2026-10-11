@@ -1,0 +1,37 @@
+# Credentials and local configuration
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+# Dependencies and build outputs
+node_modules/
+.next/
+out/
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.tsbuildinfo
+# Runtime data and generated media
+.data/
+/output/
+/outputs/
+/audio/
+/clips/
+/temp/
+/tmp/
+*.mp3
+*.wav
+*.mp4
+*.log
+fonts/*.ttf
+fonts/*.otf
+# Local tooling
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

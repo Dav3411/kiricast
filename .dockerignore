@@ -1,0 +1,11 @@
+.git
+web/
+**/node_modules
+**/__pycache__
+**/.env*
+**/*.pyc
+.next
+*.md
+.venv
+venv
+__pycache__
