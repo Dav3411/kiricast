@@ -1,131 +1,151 @@
-# Kiricast — AI 음성 드라마 서비스
+# Kiricast
 
-캐릭터와 이야기 아이디어를 바탕으로 시리즈를 설계하고, 대본·음성·다음 에피소드를 이어서 만드는 웹 서비스입니다. 한 편의 생성 결과만 다루는 대신, 시리즈 문서와 캐릭터 상태를 다음 생성 과정에 전달하는 구조를 담고 있습니다.
+![Next.js 16](https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
 
-- 개발 기간: **6개월**
-- 팀 구성: **2인 팀**
-- 본인 담당: **서비스 기획, 프론트엔드·백엔드 전반 구현 및 시스템 구성**
-- 기술: Next.js 16 · React 19 · TypeScript · Python/FastAPI · Supabase · Cloudflare R2 · FFmpeg
-- 상태: **2026-03-06 소스의 독립 보관 스냅샷**. 현재 운영 버전이나 완전한 배포 템플릿이 아닙니다.
-- 이 저장소는 포트폴리오용 소스 스냅샷입니다. 원본 Git 이력, 실제 환경변수, 사용자 데이터, 생성 미디어는 포함하지 않습니다.
+**캐릭터와 함께 이야기를 이어 가는 AI 숏폼 오디오 드라마 서비스**
 
-## 서비스 흐름
+이야기 아이디어와 캐릭터를 바탕으로 시리즈를 만들고, 대본과 음성을 생성합니다. 에피소드가 끝나면 이야기 요약과 캐릭터 상태를 갱신하고, 사용자가 선택한 방향으로 다음 화를 이어 갑니다.
 
-1. 캐릭터를 선택하거나 생성하고 이야기 아이디어를 입력합니다.
-2. 시리즈 문서와 아크 문서를 생성·수정한 뒤 잠급니다.
-3. 시나리오와 대본을 생성하고 캐릭터별 음성 및 효과음을 합성합니다.
-4. 에피소드 요약·롤링 요약·핵심 기억·캐릭터 상태를 갱신합니다.
-5. 다음 화의 방향을 선택해 연재를 이어 갑니다.
+[주요 기능](#주요-기능) · [아키텍처](#아키텍처) · [시작하기](#시작하기) · [개발 가이드](docs/DEVELOPMENT.md) · [검증 기록](VALIDATION.md)
 
-클립 재생·자막, 캐릭터 구독, 좋아요, 크레딧과 결제 연결 코드도 포함돼 있습니다. 이러한 주변 기능은 별도 외부 서비스 설정과 데이터베이스 준비가 필요합니다.
+## 주요 기능
 
-## 구조
+- **시리즈 만들기** — 세계관, 캐릭터, 주요 갈등과 장기 전개를 설정하고 편집합니다.
+- **이야기 이어 쓰기** — 시리즈 설정과 이전 이야기의 기억을 조합해 다음 에피소드의 시나리오와 대본을 생성합니다.
+- **캐릭터별 음성 합성** — 대사, 내레이션, 효과음을 처리하고 FFmpeg로 하나의 오디오로 합칩니다.
+- **다음 화 선택** — 생성된 이야기를 바탕으로 다음 전개 후보를 제시합니다.
+- **클립 감상** — 피드에서 오디오 클립과 자막을 확인하고, 캐릭터 구독과 좋아요를 이용합니다.
 
-```text
-사용자 → Next.js 페이지 / API → Supabase Auth·DB
-                   │                │ 작업 큐
-                   │                ▼
-                   └────────── Node.js worker
-                                    │
-                                    ▼
-                              FastAPI Generator
-                                    │
-                 Anthropic / OpenAI / ElevenLabs / FFmpeg
-                                    │
-                              MP3 · 자막 · 영상
-                                    │
-                              R2 → 클립 재생
+## 기술 스택
+
+| 구분 | 기술 |
+| --- | --- |
+| 웹 | Next.js 16, React 19, TypeScript, Tailwind CSS 4 |
+| 생성 서버 | Python, FastAPI |
+| 작업 처리 | Node.js worker, Supabase 기반 작업 큐 |
+| 인증·데이터 | Supabase Auth, PostgreSQL |
+| 미디어 저장 | Cloudflare R2 |
+| AI | Anthropic, OpenAI, ElevenLabs, Gemini |
+| 미디어 처리 | FFmpeg, Pillow |
+
+## 아키텍처
+
+```mermaid
+flowchart TD
+    User[사용자] --> Web[Next.js 웹 / API]
+    Web --> DB[(Supabase Auth / DB / 작업 큐)]
+    DB --> Worker[Node.js Worker]
+    Worker --> Generator[FastAPI Generator]
+    Generator --> AI[LLM / TTS API]
+    AI --> Generator
+    Generator --> Media[FFmpeg 미디어 합성]
+    Media --> Worker
+    Worker --> R2[(Cloudflare R2)]
+    Worker --> DB
+    R2 --> Web
 ```
 
-### 연재 맥락 관리
+웹 요청과 시간이 오래 걸리는 생성 작업을 분리했습니다. Worker는 큐에서 작업을 가져와 Generator를 호출하고, 생성된 미디어를 R2에 저장한 뒤 클립 정보와 작업 상태를 갱신합니다.
 
-`podcast_maker.py`는 시리즈·아크 문서, 최근 에피소드 맥락, 500자 이내 롤링 요약, 핵심 기억을 조합합니다. `core_memory`에는 주요 사건·공개된 비밀·관계·미해결 실마리·복선을 유지하는 코드가 있습니다. 캐릭터 상태 변화량을 제한하는 코드와 에피소드 유형 선택 로직도 포함돼 있습니다.
+### 이야기 생성 엔진
 
-이 구조는 연재 중 설정과 감정 변화의 일관성을 다루기 위한 구현입니다. **장기 연재 품질이나 50화 일관성을 실측해 입증한 결과는 이 저장소에 포함하지 않습니다.**
+장기 설정과 에피소드마다 변하는 정보를 분리해 다음 생성에 필요한 맥락을 구성합니다.
 
-### 비동기 생성
+| 구성 요소 | 역할 |
+| --- | --- |
+| 시리즈·아크 문서 | 세계관, 캐릭터, 갈등과 장기 전개의 기준 |
+| 에피소드·롤링 요약 | 각 화의 기록과 이전 이야기의 압축된 맥락 |
+| 핵심 기억 | 주요 사건, 공개된 비밀, 관계, 미해결 실마리와 복선 |
+| 캐릭터 상태(FSM) | 감정 상태를 수치로 관리하고 한 번의 변화 폭을 제한 |
+| 시나리오·대본 생성 | 기억과 상태를 참조해 사건을 구성하고 대사로 구체화 |
 
-`web/scripts/worker.mjs`가 생성 작업을 가져와 Generator를 호출하고, 결과를 R2에 저장한 뒤 작업 상태와 클립 정보를 갱신합니다. 일반 생성 작업과 대본 생성 작업의 처리 경로, 오래된 처리 작업의 재큐잉, 실패 시 크레딧 반환 연결이 있습니다. 이 스냅샷의 동시 실행 안전성·실서비스 부하 성능은 별도 검증 대상입니다.
+시나리오 생성에는 롤링 요약을 우선 사용하며, 없으면 최근 3개 에피소드 요약을 사용합니다. 롤링 요약은 500자 이내로 저장하고, 캐릭터 상태는 변화량을 ±1, 상태 값을 1~5로 제한합니다. 에피소드 생성 후 갱신된 요약·기억·상태는 다음 화의 입력으로 이어집니다.
 
-### 음성 제작
+핵심 구현은 [`podcast_maker.py`](podcast_maker.py), 결과 저장과 시리즈 갱신은 [`worker.mjs`](web/scripts/worker.mjs)에서 확인할 수 있습니다.
 
-대사·내레이션·효과음을 처리하고 FFmpeg로 오디오를 합성합니다. `TTS_PROVIDER`로 ElevenLabs 또는 OpenAI 경로를 선택할 수 있습니다. 음성 ID는 각 계정에서 사용할 수 있는 값을 지정해야 합니다. 이미지 생성 경로에는 OpenAI 및 Gemini 연결 코드가 있습니다.
+## 시작하기
 
-## 소스 안내
+### 요구 사항
 
-| 경로 | 내용 |
-|---|---|
-| `web/src/app/series/`, `web/src/app/api/series/` | 시리즈 생성·편집·잠금·다음 화 흐름 |
-| `web/src/app/clips/` | 클립 피드·재생·자막 |
-| `web/scripts/worker.mjs` | 작업 큐와 Generator·R2 연결 |
-| `local_server.py` | 생성 작업용 FastAPI API |
-| `podcast_maker.py` | 문서·시나리오·대본·메모리·음성 생성 |
-| `web/sql/` | 당시 관리되던 증분 SQL 자료 |
-| `agents.json` | 예제 캐릭터 설정 |
-| `web/.env.example` | 자격증명을 포함하지 않는 설정 예시 |
+- Node.js 20.9 이상, npm, Python 3.12 권장
+- FFmpeg 및 ffprobe
+- 개발용 Supabase 프로젝트와 R2 버킷
+- 사용할 LLM·TTS 공급자의 API 키
 
-## 실행 준비와 재현 한계
+> 이 저장소는 2026-03-06 기준 소스입니다. 기본 DB 테이블·일부 RPC 정의가 누락되어 있어 복원이 필요하며, 외부 배포 전 기존 권한 검사를 보완해야 합니다. 아래 명령을 실행하기 전에 [DB 준비와 배포 제한](docs/DEVELOPMENT.md#데이터베이스-준비)을 확인하세요.
 
-**빈 데이터베이스에서 전체 서비스를 바로 시작할 수 있는 상태는 아닙니다.** 당시 소스에 `agents`, `clips`, `jobs`, `credit_wallets`, `credit_ledger` 등의 기본 생성문과 일부 RPC 정의가 모두 보관되어 있지 않습니다. `web/sql/*.sql`은 완전한 초기 스키마나 실행 순서가 보장된 마이그레이션 묶음이 아닙니다. 기존 인스턴스와 분리된 개발용 DB에 기본 스키마·RPC·RLS를 복원하고 의존 순서를 검토한 뒤 사용해야 합니다. 이 정리 작업에서는 데이터베이스를 추측해 생성하거나 운영 DB에 SQL을 실행하지 않았습니다.
+### 1. 저장소와 환경 변수 준비
 
-준비물:
-
-- Node.js 20.9 이상과 npm, Python 3.12 권장
-- FFmpeg/ffprobe 실행 파일
-- 개발용 Supabase 프로젝트 및 복원한 스키마
-- R2 버킷과 서버 전용 자격증명
-- 사용할 생성 서비스의 API 키
-- 영상 자막·로고를 출력한다면 적법하게 취득한 Noto Sans KR와 Poppins 폰트
-
-기존 폰트 바이너리는 스냅샷에 라이선스 파일이 동봉되지 않아 제외했습니다. 직접 확인한 라이선스와 함께 `fonts/`에 설치하거나 `podcast_maker.py`가 탐색하는 시스템 폰트 위치에 설치하세요. 폰트가 없으면 대체 글꼴이 사용되며 출력이 달라질 수 있습니다. 웹의 `next/font/google`은 빌드할 때 Google Fonts 접근이 필요합니다.
-
-### 1. 환경 설정
-
-```powershell
-Copy-Item web/.env.example web/.env.local
+```bash
+git clone https://github.com/Dav3411/kiricast.git
+cd kiricast
+cp web/.env.example web/.env.local
 ```
 
-빈 키를 개발용 값으로 채우세요. Next.js·worker·Generator 모두 `web/.env.local`을 읽는 구조입니다. `NEXT_PUBLIC_*`에는 서버 전용 비밀키를 넣지 마세요. `SUPABASE_SECRET_KEY`, AI API 키, R2 비밀키는 서버 전용입니다.
+`web/.env.local`에 개발용 Supabase, R2, AI API 값을 입력합니다. 서버 전용 비밀키를 `NEXT_PUBLIC_*` 변수에 넣지 마세요. 전체 항목은 [환경 설정 가이드](docs/DEVELOPMENT.md#환경-변수)에 정리했습니다.
 
-### 2. 프런트엔드
+### 2. 웹 실행
 
-```powershell
+```bash
 cd web
 npm ci
 npm run dev
 ```
 
-프런트엔드 주소는 `http://localhost:3000`입니다. DB가 준비되지 않으면 인증·조회·생성 기능은 동작하지 않습니다.
+브라우저에서 <http://localhost:3000>으로 접속합니다.
 
-### 3. Generator — 저장소 루트의 별도 터미널
+### 3. Generator 실행
 
-```powershell
-py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m uvicorn local_server:app --host 127.0.0.1 --port 8787
+저장소 루트에서 새 터미널을 열어 실행합니다.
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m uvicorn local_server:app --host 127.0.0.1 --port 8787
 ```
 
-macOS/Linux에서는 `python3`와 `.venv/bin/python`을 사용합니다. Generator는 인증이 완비된 공개 API 서버로 검증하지 않았으므로 로컬 주소 또는 접근이 통제된 내부 네트워크에서 사용하세요.
+### 4. Worker 실행
 
-### 4. Worker — 스키마와 저장소 준비 후 별도 터미널
+DB와 R2 준비가 끝나면 저장소 루트에서 새 터미널을 열어 실행합니다.
 
-```powershell
+```bash
 cd web
 npm run worker:run
 ```
 
-예시 설정은 `JOB_SOURCE=development`, 폴링 모드입니다. 운영 DB·버킷 자격증명을 복사하지 말고 분리된 개발 자원을 사용하세요. 생성 버튼이나 worker 실행은 실제 API 호출과 DB·스토리지 쓰기를 일으킬 수 있습니다.
+위 예시는 macOS/Linux 기준입니다. [Windows PowerShell 명령](docs/DEVELOPMENT.md#windows-powershell)과 [외부 API 비용 및 실행 주의 사항](docs/DEVELOPMENT.md#외부-서비스와-비용)도 확인하세요.
 
-## 외부 서비스와 비용
+## 프로젝트 구조
 
-OpenAI·Anthropic·ElevenLabs·Gemini 생성 요청, R2 저장·전송, 선택적 Cloudflare Stream·Supabase·Resend 사용에는 서비스별 요금과 제한이 적용됩니다. 가격과 모델 이용 가능 여부는 각 공급자에서 확인해야 합니다. 결제 경로는 PayPal sandbox 설정부터 준비하며, 이 정리본으로 실제 결제를 검증하지 않았습니다. 약관·개인정보 페이지와 요금 문구는 당시 구현 자료이므로 실제 서비스 정책으로 그대로 사용하지 마세요.
+```text
+kiricast/
+├── web/
+│   ├── src/app/          # 페이지와 API: 시리즈, 캐릭터, 클립
+│   ├── scripts/worker.mjs
+│   ├── sql/              # 증분 SQL 자료
+│   └── .env.example
+├── local_server.py       # FastAPI 생성 서버
+├── podcast_maker.py      # 이야기·기억·음성·미디어 생성
+├── agents.json           # 예제 캐릭터 설정
+├── requirements.txt
+├── docs/DEVELOPMENT.md
+└── VALIDATION.md
+```
 
-## 검증 범위
+## 문서
 
-정리 과정의 정적 검증과 빌드 결과는 `VALIDATION.md`에 기록합니다. API 키 없는 타입·문법 검증과 실제 음성 생성·결제·배포 성공은 구분합니다. 성능 수치, 유료 사용자 수, 개인별 기여율은 소스로 확정할 수 없어 기재하지 않았습니다.
+- [개발 가이드](docs/DEVELOPMENT.md) — 환경 변수, DB 준비, Windows 실행, 폰트와 배포 제한
+- [검증 기록](VALIDATION.md) — 타입·문법 검사와 웹 빌드 결과, 실제 실행 검증 범위
 
-재배포 전에는 기존 권한 검사를 검토해야 합니다. 예를 들어 `web/src/app/api/series/[id]/lock/route.ts`는 로그인 여부를 검사하지만 시리즈 소유자와 요청자를 비교하지 않는 상태로 보관되어 있습니다. 이 스냅샷을 인터넷에 그대로 배포하지 마세요.
+## 개발 정보
 
-## 권리와 배포
+- **개발 기간:** 6개월 · 2인 팀
+- **최성원:** 서비스 기획, 프론트엔드·백엔드 전반 구현 및 시스템 구성
+- **연락처:** [GitHub](https://github.com/Dav3411) · [이메일](mailto:davdev3411@gmail.com)
 
-별도 오픈소스 라이선스를 임의로 부여하지 않았습니다. 의존 패키지는 각각의 라이선스를 따릅니다. 로고·캐릭터 설정·정책 문구 및 향후 추가할 음성·이미지·폰트의 이용·재배포 권한은 별도로 확인해야 합니다.
+## 라이선스
+
+이 저장소에는 별도 오픈소스 라이선스를 부여하지 않았습니다. 의존 패키지는 각각의 라이선스를 따릅니다. 코드와 미디어의 이용·재배포 관련 사항은 [권리 안내](docs/DEVELOPMENT.md#라이선스와-미디어)를 확인하세요.
